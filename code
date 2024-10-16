@@ -1,0 +1,77 @@
+#include <mpi.h>
+#include <stdio.h>
+#include <math.h>
+
+// Function to evaluate the curve (y = f(x))
+float f(float x, int *steps) {
+    *steps += 1; // Each function call is a computation step
+    return x * x; // Example: y = x^2
+}
+
+// Function to compute the area of a trapezoid
+float trapezoid_area(float a, float b, float d, int *steps) { 
+    float area = 0;
+    for (float x = a; x < b; x += d) {
+        area += f(x, steps) + f(x + d, steps);
+        *steps += 2; // Two additions in each iteration (f(x) + f(x+d) and area += ...)
+    }
+    *steps += 1; // Final multiplication by d/2.0f
+    return area * d / 2.0f;
+}
+
+int main(int argc, char** argv) {
+    int rank, size;
+    float a = 0.0f, b = 1.0f;  // Limits of integration
+    int n;
+    float start, end, local_area, total_area, start_time, end_time;
+    int steps = 0, local_steps = 0, total_steps = 0;
+
+    MPI_Init(&argc, &argv); // Initialize MPI
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get rank of the process
+    MPI_Comm_size(MPI_COMM_WORLD, &size); // Get number of processes
+
+    if (rank == 0) {
+        // Get the number of intervals from the user
+        printf("Enter the number of intervals: ");
+        scanf("%d", &n);
+    }
+
+    start_time = MPI_Wtime();
+
+    // Broadcast the number of intervals to all processes
+    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    steps += 1; // MPI_Bcast is one step
+
+    // Calculate the interval size for each process
+    float d = (b - a) / n;
+    steps += 2; // Two steps: subtraction and division
+    float region = (b - a) / size;
+    steps += 2; // Two steps: subtraction and division
+
+    // Calculate local bounds for each process
+    start = a + rank * region;
+    steps += 2; // Two steps: addition and multiplication
+    end = start + region;
+    steps += 1; // One step: addition
+
+    // Each process calculates the area of its subinterval
+    local_area = trapezoid_area(start, end, d, &local_steps);
+    steps += local_steps; // Include steps from trapezoid_area
+
+    // Reduce all local areas and steps to the total area and total steps on the root process
+    MPI_Reduce(&local_area, &total_area, 1, MPI_FLOAT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&local_steps, &total_steps, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    steps += 2; // Two steps for MPI_Reduce calls
+
+    end_time = MPI_Wtime();
+
+    if (rank == 0) {
+        printf("\n");
+        printf("The total time needed is: %f\n", end_time - start_time);
+        printf("The total area under the curve is: %f\n", total_area);
+        printf("The total computational steps are: %d\n", total_steps + steps);
+    }
+
+    MPI_Finalize(); // Finalize MPI
+    return 0;
+}
